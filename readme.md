@@ -75,10 +75,12 @@ Dataset ini terdiri dari tiga file utama:
 * `BX_Users.csv` — berisi informasi tentang pengguna.
 * `BX-Book-Ratings.csv` — berisi data interaksi pengguna dalam bentuk rating buku.
 
-📦 **Ukuran data setelah pemrosesan awal (filtering user aktif dan buku populer)**:
+Dari hasil eksplorasi awal, ditemukan beberapa masalah pada data. Pada data buku, terdapat missing value sebanyak 2 entri pada kolom `Book-Author` dan `Publisher` akan tetapi tidak memiliki nilai duplikat. Sedangkan pada data pengguna, kolom `Age` memiliki missing value yang cukup signifikan, yakni sekitar 110.762 dari total 278.858 pengguna (sekitar 40%) walau demikian data pengguna tidak memiliki duplikat. Namun, data rating tidak memiliki missing value maupun duplikat. Selain itu, tidak ditemukan entri duplikat pada ketiga file utama.
 
-* Jumlah pengguna: 271.379 
-* Jumlah buku: 278.858 
+📦 **Ukuran data**:
+
+* Jumlah pengguna: 278.858  
+* Jumlah buku: 271.379 
 * Jumlah interaksi rating: 1.149.780 
 
 ---
@@ -145,7 +147,7 @@ df_filtered = ratings[
 
 ---
 
-## 📊 Data Preparation
+## 📊 Data Preparation - Content Based Filtering
 
 Tahapan *data preparation* sangat penting dalam proses pengembangan sistem rekomendasi, khususnya untuk pendekatan *Content-Based Filtering (CBF)*. Dalam proyek ini, data preparation dilakukan secara bertahap dan sistematis agar model dapat bekerja secara optimal dan akurat. Berikut adalah tahapan yang dilakukan:
 
@@ -155,9 +157,7 @@ Tahapan *data preparation* sangat penting dalam proses pengembangan sistem rekom
 
 Langkah pertama adalah memilih hanya kolom yang relevan dari dataset buku:
 
-📌 **Tujuan**: Mengurangi kompleksitas dan hanya mempertahankan fitur-fitur yang dibutuhkan untuk membangun fitur konten.
-
----
+📌 **Tujuan**: Langkah pertama dalam proses data preparation adalah melakukan seleksi kolom dari dataset buku (`df_book`). Dari sekian banyak kolom yang tersedia, hanya empat kolom yang dipilih, yaitu `ISBN`, `Book-Title`, `Book-Author`, dan `Publisher`. Keempat kolom ini dianggap sebagai fitur yang paling relevan untuk membangun sistem rekomendasi berbasis konten (content-based filtering), karena berisi identitas unik buku dan informasi tekstual yang dapat digunakan untuk mengekstrak representasi konten buku. Seleksi ini juga bertujuan untuk menyederhanakan data dan mengurangi noise dari kolom-kolom lain yang tidak diperlukan dalam pemodelan.
 
 ### 2. **Menghapus Nilai Kosong (Missing Values)**
 
@@ -189,6 +189,68 @@ Langkah pertama adalah memilih hanya kolom yang relevan dari dataset buku:
 
 ---
 
+Berikut versi yang lebih terstruktur dan lebih baik untuk bagian **Data Preparation** yang menjelaskan kode yang kamu berikan:
+
+---
+
+## 📦 Data Preparation - User Collaborative Filtering
+
+### 1. **Filtering Rating Positif**
+
+Langkah awal dalam tahap persiapan data adalah menyaring data rating untuk hanya menyertakan interaksi yang bermakna. Pada dataset ini, nilai rating `0` dianggap tidak merepresentasikan opini pengguna (misalnya, karena pengguna hanya melihat buku tanpa memberikan penilaian). Oleh karena itu, hanya rating dengan nilai lebih dari 0 yang dipertahankan untuk dianalisis lebih lanjut:
+
+```python
+ratings_filtered = df_rating[df_rating['Book-Rating'] > 0]
+```
+
+### 2. **Agregasi Rating Ganda**
+
+Dalam beberapa kasus, satu pengguna dapat memberikan lebih dari satu rating untuk buku yang sama. Untuk menghindari duplikasi dalam data interaksi, dilakukan agregasi menggunakan **mean rating** per kombinasi `User-ID` dan `ISBN`.
+
+```python
+ratings_grouped = ratings_filtered.groupby(['User-ID', 'ISBN'], as_index=False)['Book-Rating'].mean()
+```
+
+### 3. **Seleksi Pengguna dan Buku Terpopuler**
+
+Karena sistem rekomendasi berbasis memori (seperti KNN) membutuhkan matriks yang padat dan representatif, dilakukan penyaringan terhadap data berdasarkan popularitas:
+
+* Dipilih **1.000 buku** dengan jumlah interaksi terbanyak.
+* Dipilih **1.000 pengguna** dengan jumlah aktivitas (rating) terbanyak.
+
+Langkah ini bertujuan untuk meningkatkan efisiensi dan menghindari sparsity ekstrem pada data.
+
+```python
+top_isbn = ratings_grouped['ISBN'].value_counts().head(1000).index
+top_users = ratings_grouped['User-ID'].value_counts().head(1000).index
+```
+
+### 4. **Membangun Dataset Skala Kecil**
+
+Setelah daftar pengguna dan buku terpopuler ditentukan, dibuat subset data yang hanya memuat interaksi antara pengguna dan buku yang ada dalam daftar tersebut. Dataset ini akan menjadi dasar pembentukan matriks interaksi.
+
+```python
+ratings_small = ratings_grouped[
+    ratings_grouped['ISBN'].isin(top_isbn) & ratings_grouped['User-ID'].isin(top_users)
+]
+```
+
+### 5. **Membangun Matriks Interaksi Pengguna-Buku**
+
+Data kemudian diubah menjadi **user-item interaction matrix**, di mana baris mewakili pengguna dan kolom mewakili buku. Nilai dalam matriks adalah skor rating yang telah diberikan oleh pengguna. Untuk sel kosong (tidak ada interaksi), diisi dengan `0` untuk menjaga struktur data numerik.
+
+```python
+user_item_matrix = ratings_small.pivot(index='User-ID', columns='ISBN', values='Book-Rating').fillna(0)
+```
+
+### 6. **Konversi ke Format Sparse Matrix**
+
+Karena sebagian besar nilai dalam matriks interaksi adalah nol (sparse), digunakan representasi **compressed sparse row (CSR)** untuk menghemat memori dan mempercepat komputasi.
+
+```python
+matrix_sparse = csr_matrix(user_item_matrix.values)
+```
+
 ## ✍️ Kesimpulan
 
 Setiap langkah dalam proses *data preparation* dirancang untuk meningkatkan kualitas data yang digunakan oleh algoritma *Content-Based Filtering*. Normalisasi, penggabungan fitur, hingga filtering data bertujuan untuk memastikan bahwa sistem rekomendasi yang dibangun mampu memberikan hasil yang relevan, efisien, dan bebas dari error akibat kualitas data yang buruk.
@@ -206,20 +268,39 @@ Pada tahap ini, kami membangun dan membandingkan dua pendekatan sistem rekomenda
 
 ### 📌 1. Content-Based Filtering (CBF)
 
-CBF merekomendasikan item berdasarkan kemiripan konten item itu sendiri. Dalam proyek ini, kami membangun representasi konten buku dengan menggabungkan fitur teks seperti judul, penulis, dan penerbit, lalu mengubahnya menjadi vektor menggunakan **TF-IDF Vectorizer**.
+Content-Based Filtering adalah metode sistem rekomendasi yang merekomendasikan item berdasarkan kemiripan konten antar item itu sendiri, bukan dari preferensi pengguna lain.
 
-* **Proses:**
+Dalam proyek ini, konten buku direpresentasikan menggunakan kombinasi fitur teks seperti **judul buku**, **penulis**, dan **penerbit**. Fitur-fitur ini digabungkan menjadi satu kolom teks, lalu diubah menjadi representasi numerik menggunakan **TF-IDF (Term Frequency–Inverse Document Frequency)**. Proses ini dilakukan pada tahap *data preparation*.
 
-  * Menggabungkan fitur teks buku menjadi satu fitur konten.
-  * Menghitung bobot kata menggunakan TF-IDF.
-  * Mengukur kemiripan antar buku menggunakan **cosine similarity**.
-  * Untuk setiap user, sistem mengambil satu buku yang paling tinggi rating-nya sebagai *query*, lalu mencari buku serupa berdasarkan konten.
+#### ✅ **Modeling dengan Cosine Similarity**
+
+Setelah mendapatkan representasi vektor dari setiap buku, kemiripan antar buku dihitung menggunakan **cosine similarity**. Cosine similarity mengukur sudut antara dua vektor dalam ruang fitur, sehingga cocok untuk mengukur kemiripan dokumen berbasis teks.
+
+#### 🔍 **Proses Rekomendasi**
+
+1. Untuk setiap pengguna, sistem mengambil satu buku dengan rating tertinggi (paling disukai) sebagai referensi.
+2. Sistem mencari buku-buku lain yang **paling mirip** dengan buku tersebut berdasarkan konten (judul, penulis, penerbit).
+3. Sistem menyajikan **Top-N buku serupa** sebagai rekomendasi.
+
+Pendekatan ini memiliki keunggulan dalam memahami konten item, tetapi memiliki keterbatasan seperti cold-start terhadap item atau user baru tanpa riwayat.
 
 * **Contoh Output (Top-5 Recommendation):**
+
+Berikut adalah hasil rekomendasi menggunakan metode **Content-Based Filtering (CBF)** untuk buku *"cat & mouse (alex cross novels)"*:
 
 ```python
 cb_recommend("cat & mouse (alex cross novels)", 5)
 ```
+
+| Book-Title                              | Book-Author     |
+| --------------------------------------- | --------------- |
+| jack & jill (alex cross novels)         | james patterson |
+| along came a spider (alex cross novels) | james patterson |
+| roses are red (alex cross novels)       | james patterson |
+| the beach house                         | james patterson |
+| kiss the girls                          | james patterson |
+
+Semua buku yang direkomendasikan berasal dari penulis yang sama dan memiliki genre/seri yang mirip, menunjukkan bahwa model berhasil menangkap kemiripan konten antar buku dengan baik.
 
 * **Kelebihan:**
 
@@ -245,7 +326,25 @@ UBCF merekomendasikan item berdasarkan kesamaan perilaku antar pengguna. Jika du
   * Mengambil user-user terdekat (nearest neighbors) dan merekomendasikan buku yang belum pernah dibaca tetapi populer di kalangan tetangga tersebut.
 
 * **Contoh Output:**
-  Rekomendasi top-N buku untuk user tertentu berdasarkan rating user-user serupa.
+  Rekomendasi top-10 buku untuk user dengan ID `82893` berdasarkan preferensi user-user serupa:
+
+```python
+ubcf_recommend(82893, 10)
+```
+
+| Book-Title                                                   | Book-Author            |
+| ------------------------------------------------------------ | ---------------------- |
+| seabiscuit: an american legend                               | laura hillenbrand      |
+| deception point                                              | dan brown              |
+| the lovely bones: a novel                                    | alice sebold           |
+| the no. 1 ladies' detective agency (today show book club #1) | alexander mccall smith |
+| harry potter and the sorcerer's stone (harry potter, #1)     | j. k. rowling          |
+| mystic river                                                 | dennis lehane          |
+| saving faith                                                 | david baldacci         |
+| year of wonders                                              | geraldine brooks       |
+
+Model ini dapat menangkap kesamaan preferensi antar pengguna dan merekomendasikan buku yang populer di kalangan pengguna dengan minat serupa.
+
 
 * **Kelebihan:**
 
