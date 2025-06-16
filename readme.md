@@ -250,11 +250,6 @@ Karena sebagian besar nilai dalam matriks interaksi adalah nol (sparse), digunak
 ```python
 matrix_sparse = csr_matrix(user_item_matrix.values)
 ```
-
-## ✍️ Kesimpulan
-
-Setiap langkah dalam proses *data preparation* dirancang untuk meningkatkan kualitas data yang digunakan oleh algoritma *Content-Based Filtering*. Normalisasi, penggabungan fitur, hingga filtering data bertujuan untuk memastikan bahwa sistem rekomendasi yang dibangun mampu memberikan hasil yang relevan, efisien, dan bebas dari error akibat kualitas data yang buruk.
-
 ---
 
 ## 🤖 Modeling
